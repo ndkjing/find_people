@@ -85,6 +85,29 @@ class EmbeddingFace:
         learner.model.eval()
         print('learner loaded')
 
+    def load_model(self):
+        # 模型和device
+        # net and model
+        torch.set_grad_enabled(False)
+        cfg = None
+        if self.network == "mobile0.25":
+            cfg = cfg_mnet
+        elif self.network == "resnet50":
+            cfg = cfg_re50
+        retina_net = RetinaFace(cfg=cfg, phase='test')
+        retina_net = load_model(retina_net, trained_model, cpu)
+        retina_net.eval()
+        #     print('Finished loading model!')
+        #     print(net)
+        cudnn.benchmark = True
+        device = torch.device("cpu" if cpu else "cuda:0")
+        retina_net = retina_net.to(device)
+
+        # Model parameters
+        image_w = 112
+        image_h = 112
+        channel = 3
+        emb_size = 512
 
 def check_keys(model, pretrained_state_dict):
     ckpt_keys = set(pretrained_state_dict.keys())
@@ -313,28 +336,7 @@ def warp_and_crop_face(src_img,  # BGR
     return face_img  # BGR
 
 
-# 模型和device
-# net and model
-torch.set_grad_enabled(False)
-cfg = None
-if network == "mobile0.25":
-    cfg = cfg_mnet
-elif network == "resnet50":
-    cfg = cfg_re50
-retina_net = RetinaFace(cfg=cfg, phase='test')
-retina_net = load_model(retina_net, trained_model, cpu)
-retina_net.eval()
-#     print('Finished loading model!')
-#     print(net)
-cudnn.benchmark = True
-device = torch.device("cpu" if cpu else "cuda:0")
-retina_net = retina_net.to(device)
 
-# Model parameters
-image_w = 112
-image_h = 112
-channel = 3
-emb_size = 512
 
 
 # 执行人脸对齐
@@ -493,7 +495,7 @@ def get_one_image_embedding(conf=conf, model=learner.model,tta=False,input_image
         else:
             return model(conf.test_transform(img).to(conf.device).unsqueeze(0))
 
-#
+# 提取人脸特征
 def prepare_my_facebank(conf, model, tta=True):
     model.eval()
     embeddings = []
