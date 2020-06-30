@@ -12,7 +12,7 @@ def get_config(training = True):
     conf.log_path = conf.work_path/'log'
     # 修改为绝对路径
     # conf.save_path = conf.work_path/'save'
-    conf.save_path = Path(base_config.root_dir)/'core/face/insight_face/weights'
+    conf.save_path = Path(base_config.root_dir)/'core/weights/insight_face'
     conf.input_size = [112,112]
     conf.embedding_size = 512
     conf.use_mobilfacenet = True

@@ -51,63 +51,301 @@ def singleton(cls):
 class EmbeddingFace:
     def __init__(self):
         # detect 超参数
-        self.trained_model =os.path.join(base_config.root_dir, 'core/face/retinaface/weights/mobilenet0.25_Final.pth')
+        self.trained_model =os.path.join(base_config.root_dir, 'core/weights/mobilenet0.25_Final.pth')
         self.network = 'mobile0.25'  # 'resnet50'
-        cpu = False
-        confidence_threshold = 0.02
-        top_k = 5000
-        nms_threshold = 0.4
-        keep_top_k = 750
-        save_image = False
-        vis_thres = 0.6
+        self.cpu = False
+        self.confidence_threshold = 0.02
+        self.top_k = 5000
+        self.nms_threshold = 0.4
+        self.keep_top_k = 750
+        self.save_image = False
+        self.vis_thres = 0.6
 
         # embedding 超参数
-        prepare_image_path = os.path.join(base_config.data_rootdir,'extract_face')  # facebank路径 按名称进行命名  提取特征后在该路径保存name和feature
-        threshold = 1.54  # ',help='threshold to decide identical faces',default=1.54, type=float)
-        update = True  # 更新facebank
-        tta = False  # ", help="whether test time augmentation",action="store_true")
-        score = False  # ", help="whether show the confidence score",action="store_true")
-        begin = 0  # ", help="from when to start detection(in seconds)", default=0, type=int)
-        duration = 0  # ", help="perform detection for how long(in seconds)", default=0, type=int)
+        # facebank路径 按名称进行命名  提取特征后在该路径保存name和feature
+        # 修改为自己需要的目录
+        # self.prepare_image_path = os.path.join(base_config.data_rootdir,'extract_face')
+        self.prepare_image_path = r'C:\PythonProject\find_people\data\facebank'
+        self.threshold = 1.54  # ',help='threshold to decide identical faces',default=1.54, type=float)
+        self.update = True  # 更新facebank
+        self.tta = False  # ", help="whether test time augmentation",action="store_true")
+        self.score = False  # ", help="whether show the confidence score",action="store_true")
+        self.begin = 0  # ", help="from when to start detection(in seconds)", default=0, type=int)
+        self.duration = 0  # ", help="perform detection for how long(in seconds)", default=0, type=int)
 
         # 配置embedding 模型
-        conf = get_config(False)
-        conf.use_mobilfacenet = True  # 是否使用mobilenet模型
-        learner = face_learner(conf, True)
-        learner.threshold = threshold
-        if conf.device.type == 'cpu':
+        self.conf = get_config(False)
+        self.conf.use_mobilfacenet = True  # 是否使用mobilenet模型
+        self.learner = face_learner(self.conf, True)
+        self.learner.threshold = self.threshold
+        if self.conf.device.type == 'cpu':
             print('load cpu model ...')
             # learner.load_state(conf, 'cpu_final.pth', True, True)
-            learner.load_state(conf, 'final_mobile.pth', True, True)
+            self.learner.load_state(self.conf, 'final_mobile.pth', True, True)
         else:
             print('load gpu model ...')
-            learner.load_state(conf, 'final_mobile.pth', True, True)  # 加载指定路径下 Resnet：final_resnet50.pth
-        learner.model.eval()
-        print('learner loaded')
+            self.learner.load_state(self.conf, 'final_mobile.pth', True, True)  # 加载指定路径下 Resnet：final_resnet50.pth
+        self.learner.model.eval()
+        print('embedding learner loaded')
 
-    def load_model(self):
-        # 模型和device
-        # net and model
         torch.set_grad_enabled(False)
         cfg = None
         if self.network == "mobile0.25":
             cfg = cfg_mnet
         elif self.network == "resnet50":
             cfg = cfg_re50
-        retina_net = RetinaFace(cfg=cfg, phase='test')
-        retina_net = load_model(retina_net, trained_model, cpu)
-        retina_net.eval()
+        self.retina_net_struct = RetinaFace(cfg=cfg, phase='test')
+        self.retina_net = self.load_model(self.retina_net_struct, self.trained_model, self.cpu)
+        self.retina_net.eval()
         #     print('Finished loading model!')
         #     print(net)
         cudnn.benchmark = True
-        device = torch.device("cpu" if cpu else "cuda:0")
-        retina_net = retina_net.to(device)
+        device = torch.device("cpu" if self.cpu else "cuda:0")
+        self.retina_net = self.retina_net.to(device)
 
         # Model parameters
-        image_w = 112
-        image_h = 112
-        channel = 3
-        emb_size = 512
+        self.image_w = 112
+        self.image_h = 112
+        self.channel = 3
+        self.emb_size = 512
+
+    def load_model(self,model, pretrained_path, load_to_cpu):
+        print('Loading pretrained model from {}'.format(pretrained_path))
+        if load_to_cpu:
+            pretrained_dict = torch.load(pretrained_path, map_location=lambda storage, loc: storage)
+        else:
+            device = torch.cuda.current_device()
+            pretrained_dict = torch.load(pretrained_path, map_location=lambda storage, loc: storage.cuda(device))
+        if "state_dict" in pretrained_dict.keys():
+            pretrained_dict = remove_prefix(pretrained_dict['state_dict'], 'module.')
+        else:
+            pretrained_dict = remove_prefix(pretrained_dict, 'module.')
+        check_keys(model, pretrained_dict)
+        model.load_state_dict(pretrained_dict, strict=False)
+        return model
+
+    # 加载人脸特征
+    def load_my_facebank(self,conf=None):
+        embeddings = torch.load(os.path.join(self.prepare_image_path, 'facebank.pth'))
+        names = np.load(os.path.join(self.prepare_image_path, 'name.npy'))
+        return embeddings, names
+
+    # 获取人脸嵌入特征
+    def return_facebank(self,update=False):
+        if update:
+            targets, names = self.prepare_my_facebank(self.conf, self.learner.model, tta=False)
+            print('facebank updated')
+        else:
+            targets, names = self.load_my_facebank(self.conf)
+            print('facebank loaded')
+        return targets, names
+
+    # 提取人脸特征
+    def prepare_my_facebank(self,conf, model, tta=True):
+        model.eval()
+        embeddings = []
+        embedding_numpy = []
+        names = ['Unknown']  # 留一个位置给unkn
+        for folder_name in tqdm.tqdm(os.listdir(self.prepare_image_path)):
+            folder_path = os.path.join(self.prepare_image_path, folder_name)
+            print(folder_path)
+            if os.path.isfile(folder_path):  # 若是文件则跳过  应该按名称命名的文件夹
+                continue
+            else:
+                embs = []
+                for image_name in tqdm.tqdm(os.listdir(folder_path)):
+                    image_full_path = os.path.join(folder_path, image_name)
+                    if not os.path.isfile(image_full_path):
+                        continue
+                    else:
+                        face_image = self.detect_face(input_image_path=image_full_path)  # 返回的是GBR 格式图像
+                        if face_image is None:
+                            continue
+                        img = face_image[:, :, [2, 1, 0]]
+                        #                     img=np.transpose(face_image,(2,0,1))
+                        with torch.no_grad():
+                            if tta:
+                                mirror = trans.functional.hflip(img)
+                                emb = model(conf.test_transform(img).to(conf.device).unsqueeze(0))
+                                emb_mirror = model(conf.test_transform(mirror).to(conf.device).unsqueeze(0))
+                                embs.append(l2_norm(emb + emb_mirror))
+                            else:
+                                embs.append(model(conf.test_transform(img).to(conf.device).unsqueeze(0)))
+            if len(embs) == 0:
+                continue
+            embedding = torch.cat(embs).mean(0, keepdim=True)
+            print(type(embedding), embedding.shape)
+            # 在文件夹中保存numpy矩阵
+            feature_numpy = torch.cat(embs).cpu().numpy()
+            print('save numpy mat addr', folder_path)
+            np.save(os.path.join(folder_path, 'embedding_feature.npy'), feature_numpy)
+            print(type(feature_numpy), feature_numpy.shape)
+            embedding_numpy.append(feature_numpy)
+            embeddings.append(embedding)
+            names.append(folder_name)
+        # embeddings = torch.cat(embeddings)
+        # names = np.array(names)
+        # torch.save(embeddings, os.path.join(self.prepare_image_path, 'facebank.pth'))
+        # np.save(os.path.join(prepare_image_path, 'name.npy'), names)
+        return embeddings, names
+
+    def detect_face(self,img=None, input_image_path="./curve/test.jpg", output_image_path='test.jpg'):
+        """
+        img 输入GBR格式图片矩阵
+        input_image_path 输入图片路径
+        output_image_path 保存图片路径
+        """
+        net = self.retina_net
+        device = self.device
+        resize = 1
+        if isinstance(input_image_path, str) and img is None and input_image_path.endswith('jpg'):
+            img_raw = cv2.imread(input_image_path, cv2.IMREAD_COLOR)
+            img = np.float32(img_raw)
+        else:
+            img_raw = img
+        try:
+            im_height, im_width, _ = img.shape
+        except Exception:
+            print('error image', input_image_path)
+            return None
+        scale = torch.Tensor([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
+        img -= (104, 117, 123)
+        img = img.transpose(2, 0, 1)
+        img = torch.from_numpy(img).unsqueeze(0)
+        img = img.to(device)
+        scale = scale.to(device)
+
+        tic = time.time()
+        loc, conf, landms = net(img)  # forward pass
+        print('net forward time: {:.4f}'.format(time.time() - tic))
+
+        priorbox = PriorBox(self.cfg, image_size=(im_height, im_width))
+        priors = priorbox.forward()
+        priors = priors.to(device)
+        prior_data = priors.data
+        boxes = decode(loc.data.squeeze(0), prior_data, self.cfg['variance'])
+        boxes = boxes * scale / resize
+        boxes = boxes.cpu().numpy()
+        scores = conf.squeeze(0).data.cpu().numpy()[:, 1]
+        landms = decode_landm(landms.data.squeeze(0), prior_data, self.cfg['variance'])
+        scale1 = torch.Tensor([img.shape[3], img.shape[2], img.shape[3], img.shape[2],
+                               img.shape[3], img.shape[2], img.shape[3], img.shape[2],
+                               img.shape[3], img.shape[2]])
+        scale1 = scale1.to(device)
+        landms = landms * scale1 / resize
+        landms = landms.cpu().numpy()
+
+        # ignore low scores
+        inds = np.where(scores > self.confidence_threshold)[0]
+        boxes = boxes[inds]
+        landms = landms[inds]
+        scores = scores[inds]
+
+        # keep top-K before NMS
+        order = scores.argsort()[::-1][:self.top_k]
+        boxes = boxes[order]
+        landms = landms[order]
+        scores = scores[order]
+
+        # do NMS
+        dets = np.hstack((boxes, scores[:, np.newaxis])).astype(np.float32, copy=False)
+        keep = py_cpu_nms(dets, self.nms_threshold)
+        # keep = nms(dets, args.nms_threshold,force_cpu=args.cpu)
+        dets = dets[keep, :]
+        landms = landms[keep]
+
+        # keep top-K faster NMS
+        dets = dets[:self.keep_top_k, :]
+        landms = landms[:self.keep_top_k, :]
+
+        dets = np.concatenate((dets, landms), axis=1)
+
+        # show image
+        for b in dets:  # b 0~3 为xmin ymin xmax ymax 4 为threshold  后面连续五个点为地标
+            if b[4] < vis_thres:
+                continue
+            # 仅处理一张图片只有一个人脸的情况
+            try:
+                crop_image = img_raw[int(b[1]):int(b[3]), int(b[0]):int(b[2]), :]
+
+                #             resize_crop_image = cv2.resize(crop_image,(112,112))
+                # 执行人脸对齐 point 按照 x1 x2 x3 x4 x5 y1 y2 y3 y4 y5
+                point = [int(i) for i in
+                         [b[5] - b[0], b[7] - b[0], b[9] - b[0], b[11] - b[0], b[13] - b[0], b[6] - b[1], b[8] - b[1],
+                          b[10] - b[1], b[12] - b[1], b[14] - b[1]]]
+                #             point  =[int(i) for i in [b[5]-b[0], b[6]-b[1],b[7]-b[0], b[8]-b[1], b[9]-b[0],b[10]-b[1], b[11]-b[0], b[12]-b[1], b[13]-b[0],b[14]-b[1]]]
+                #             return crop_image ,point
+                facial5points = np.array(point)
+                #             print(crop_image.shape,facial5points)
+                resize_crop_image = align_face(crop_image, facial5points)
+                return resize_crop_image
+            except:
+                print('exception')
+                return None
+            text = "{:.4f}".format(b[4])
+            b = list(map(int, b))
+            cv2.rectangle(img_raw, (b[0], b[1]), (b[2], b[3]), (0, 0, 255), 2)
+            cx = b[0]
+            cy = b[1] + 12
+            cv2.putText(img_raw, text, (cx, cy),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255))
+
+            # landms
+            cv2.circle(img_raw, (b[5], b[6]), 1, (0, 0, 255), 4)
+            cv2.circle(img_raw, (b[7], b[8]), 1, (0, 255, 255), 4)
+            cv2.circle(img_raw, (b[9], b[10]), 1, (255, 0, 255), 4)
+            cv2.circle(img_raw, (b[11], b[12]), 1, (0, 255, 0), 4)
+            cv2.circle(img_raw, (b[13], b[14]), 1, (255, 0, 0), 4)
+
+    # 执行人脸对齐
+    def align_face(self,img, facial5points):
+        facial5points = np.reshape(facial5points, (2, 5))
+        crop_size = (self.image_h, self.image_w)
+        default_square = True
+        inner_padding_factor = 0.25
+        outer_padding = (0, 0)
+        output_size = (self.image_h, self.image_w)
+        #     print('output_size',output_size)
+        # get the reference 5 landmarks position in the crop settings
+        reference_5pts = get_reference_facial_points(output_size, inner_padding_factor, outer_padding,
+                                                     default_square)
+        #     print('reference_5pts',reference_5pts)
+        # dst_img = warp_and_crop_face(raw, facial5points)
+        dst_img = warp_and_crop_face(img, facial5points, reference_pts=reference_5pts, crop_size=crop_size)
+        #     print('dst_img',dst_img.shape)
+        return dst_img
+
+    def embedding_one_image(self,conf, model, tta=True, input_image_path=None):
+        face_image = self.detect_face(input_image_path=input_image_path)  # 返回的是GBR 格式图像
+        if face_image is None:
+            return None
+        img = face_image[:, :, [2, 1, 0]]
+        #                     img=np.transpose(face_image,(2,0,1))
+        with torch.no_grad():
+            if tta:
+                mirror = trans.functional.hflip(img)
+                emb = model(self.conf.test_transform(img).to(self.conf.device).unsqueeze(0))
+                emb_mirror = model(self.conf.test_transform(mirror).to(self.conf.device).unsqueeze(0))
+                return l2_norm(emb + emb_mirror)
+            else:
+                return model(self.conf.test_transform(img).to(self.conf.device).unsqueeze(0))
+
+    def get_one_image_embedding(self, tta=False, input_image_path=None):
+        conf = self.conf
+        model = self.learner.model
+        face_image = self.detect_face(input_image_path=input_image_path)  # 返回的是GBR 格式图像
+        if face_image is None:
+            return None
+        img = face_image[:, :, [2, 1, 0]]
+        #                     img=np.transpose(face_image,(2,0,1))
+        with torch.no_grad():
+            if tta:
+                mirror = trans.functional.hflip(img)
+                emb = model(conf.test_transform(img).to(conf.device).unsqueeze(0))
+                emb_mirror = model(conf.test_transform(mirror).to(conf.device).unsqueeze(0))
+                return l2_norm(emb + emb_mirror)
+            else:
+                return model(conf.test_transform(img).to(conf.device).unsqueeze(0))
 
 def check_keys(model, pretrained_state_dict):
     ckpt_keys = set(pretrained_state_dict.keys())
@@ -129,20 +367,7 @@ def remove_prefix(state_dict, prefix):
     return {f(key): value for key, value in state_dict.items()}
 
 
-def load_model(model, pretrained_path, load_to_cpu):
-    print('Loading pretrained model from {}'.format(pretrained_path))
-    if load_to_cpu:
-        pretrained_dict = torch.load(pretrained_path, map_location=lambda storage, loc: storage)
-    else:
-        device = torch.cuda.current_device()
-        pretrained_dict = torch.load(pretrained_path, map_location=lambda storage, loc: storage.cuda(device))
-    if "state_dict" in pretrained_dict.keys():
-        pretrained_dict = remove_prefix(pretrained_dict['state_dict'], 'module.')
-    else:
-        pretrained_dict = remove_prefix(pretrained_dict, 'module.')
-    check_keys(model, pretrained_dict)
-    model.load_state_dict(pretrained_dict, strict=False)
-    return model
+
 
 
 # 人脸对齐
@@ -338,232 +563,8 @@ def warp_and_crop_face(src_img,  # BGR
 
 
 
-
-# 执行人脸对齐
-def align_face(img, facial5points):
-    facial5points = np.reshape(facial5points, (2, 5))
-    crop_size = (image_h, image_w)
-    default_square = True
-    inner_padding_factor = 0.25
-    outer_padding = (0, 0)
-    output_size = (image_h, image_w)
-    #     print('output_size',output_size)
-    # get the reference 5 landmarks position in the crop settings
-    reference_5pts = get_reference_facial_points(output_size, inner_padding_factor, outer_padding, default_square)
-    #     print('reference_5pts',reference_5pts)
-    # dst_img = warp_and_crop_face(raw, facial5points)
-    dst_img = warp_and_crop_face(img, facial5points, reference_pts=reference_5pts, crop_size=crop_size)
-    #     print('dst_img',dst_img.shape)
-    return dst_img
-
-
-def detect_face(img=None, input_image_path="./curve/test.jpg", output_image_path='test.jpg', net=retina_net,
-                device=device):
-    """
-    img 输入GBR格式图片矩阵
-    input_image_path 输入图片路径
-    output_image_path 保存图片路径
-    """
-    resize = 1
-    if isinstance(input_image_path, str) and img is None and input_image_path.endswith('jpg'):
-        img_raw = cv2.imread(input_image_path, cv2.IMREAD_COLOR)
-        img = np.float32(img_raw)
-    else:
-        img_raw = img
-    try:
-        im_height, im_width, _ = img.shape
-    except Exception:
-        print('error image',input_image_path)
-        return None
-    scale = torch.Tensor([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
-    img -= (104, 117, 123)
-    img = img.transpose(2, 0, 1)
-    img = torch.from_numpy(img).unsqueeze(0)
-    img = img.to(device)
-    scale = scale.to(device)
-
-    tic = time.time()
-    loc, conf, landms = net(img)  # forward pass
-    print('net forward time: {:.4f}'.format(time.time() - tic))
-
-    priorbox = PriorBox(cfg, image_size=(im_height, im_width))
-    priors = priorbox.forward()
-    priors = priors.to(device)
-    prior_data = priors.data
-    boxes = decode(loc.data.squeeze(0), prior_data, cfg['variance'])
-    boxes = boxes * scale / resize
-    boxes = boxes.cpu().numpy()
-    scores = conf.squeeze(0).data.cpu().numpy()[:, 1]
-    landms = decode_landm(landms.data.squeeze(0), prior_data, cfg['variance'])
-    scale1 = torch.Tensor([img.shape[3], img.shape[2], img.shape[3], img.shape[2],
-                           img.shape[3], img.shape[2], img.shape[3], img.shape[2],
-                           img.shape[3], img.shape[2]])
-    scale1 = scale1.to(device)
-    landms = landms * scale1 / resize
-    landms = landms.cpu().numpy()
-
-    # ignore low scores
-    inds = np.where(scores > confidence_threshold)[0]
-    boxes = boxes[inds]
-    landms = landms[inds]
-    scores = scores[inds]
-
-    # keep top-K before NMS
-    order = scores.argsort()[::-1][:top_k]
-    boxes = boxes[order]
-    landms = landms[order]
-    scores = scores[order]
-
-    # do NMS
-    dets = np.hstack((boxes, scores[:, np.newaxis])).astype(np.float32, copy=False)
-    keep = py_cpu_nms(dets, nms_threshold)
-    # keep = nms(dets, args.nms_threshold,force_cpu=args.cpu)
-    dets = dets[keep, :]
-    landms = landms[keep]
-
-    # keep top-K faster NMS
-    dets = dets[:keep_top_k, :]
-    landms = landms[:keep_top_k, :]
-
-    dets = np.concatenate((dets, landms), axis=1)
-
-    # show image
-    for b in dets:  # b 0~3 为xmin ymin xmax ymax 4 为threshold  后面连续五个点为地标
-        if b[4] < vis_thres:
-            continue
-        # 仅处理一张图片只有一个人脸的情况
-        try:
-            crop_image = img_raw[int(b[1]):int(b[3]), int(b[0]):int(b[2]), :]
-
-            #             resize_crop_image = cv2.resize(crop_image,(112,112))
-            # 执行人脸对齐 point 按照 x1 x2 x3 x4 x5 y1 y2 y3 y4 y5
-            point = [int(i) for i in
-                     [b[5] - b[0], b[7] - b[0], b[9] - b[0], b[11] - b[0], b[13] - b[0], b[6] - b[1], b[8] - b[1],
-                      b[10] - b[1], b[12] - b[1], b[14] - b[1]]]
-            #             point  =[int(i) for i in [b[5]-b[0], b[6]-b[1],b[7]-b[0], b[8]-b[1], b[9]-b[0],b[10]-b[1], b[11]-b[0], b[12]-b[1], b[13]-b[0],b[14]-b[1]]]
-            #             return crop_image ,point
-            facial5points = np.array(point)
-            #             print(crop_image.shape,facial5points)
-            resize_crop_image = align_face(crop_image, facial5points)
-            return resize_crop_image
-        except:
-            print('exception')
-            return None
-        text = "{:.4f}".format(b[4])
-        b = list(map(int, b))
-        cv2.rectangle(img_raw, (b[0], b[1]), (b[2], b[3]), (0, 0, 255), 2)
-        cx = b[0]
-        cy = b[1] + 12
-        cv2.putText(img_raw, text, (cx, cy),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255))
-
-        # landms
-        cv2.circle(img_raw, (b[5], b[6]), 1, (0, 0, 255), 4)
-        cv2.circle(img_raw, (b[7], b[8]), 1, (0, 255, 255), 4)
-        cv2.circle(img_raw, (b[9], b[10]), 1, (255, 0, 255), 4)
-        cv2.circle(img_raw, (b[11], b[12]), 1, (0, 255, 0), 4)
-        cv2.circle(img_raw, (b[13], b[14]), 1, (255, 0, 0), 4)
-
-
-def embedding_one_image(conf,model,tta=True,input_image_path=None):
-    face_image = detect_face(input_image_path=input_image_path)  # 返回的是GBR 格式图像
-    if face_image is None:
-        return None
-    img = face_image[:, :, [2, 1, 0]]
-    #                     img=np.transpose(face_image,(2,0,1))
-    with torch.no_grad():
-        if tta:
-            mirror = trans.functional.hflip(img)
-            emb = model(conf.test_transform(img).to(conf.device).unsqueeze(0))
-            emb_mirror = model(conf.test_transform(mirror).to(conf.device).unsqueeze(0))
-            return l2_norm(emb + emb_mirror)
-        else:
-            return model(conf.test_transform(img).to(conf.device).unsqueeze(0))
-
-def get_one_image_embedding(conf=conf, model=learner.model,tta=False,input_image_path=None):
-    face_image = detect_face(input_image_path=input_image_path)  # 返回的是GBR 格式图像
-    if face_image is None:
-        return None
-    img = face_image[:, :, [2, 1, 0]]
-    #                     img=np.transpose(face_image,(2,0,1))
-    with torch.no_grad():
-        if tta:
-            mirror = trans.functional.hflip(img)
-            emb = model(conf.test_transform(img).to(conf.device).unsqueeze(0))
-            emb_mirror = model(conf.test_transform(mirror).to(conf.device).unsqueeze(0))
-            return l2_norm(emb + emb_mirror)
-        else:
-            return model(conf.test_transform(img).to(conf.device).unsqueeze(0))
-
-# 提取人脸特征
-def prepare_my_facebank(conf, model, tta=True):
-    model.eval()
-    embeddings = []
-    embedding_numpy = []
-    names = ['Unknown']  # 留一个位置给unkn
-    for folder_name in tqdm.tqdm(os.listdir(prepare_image_path)):
-        folder_path = os.path.join(prepare_image_path, folder_name)
-        print(folder_path)
-        if os.path.isfile(folder_path):  # 若是文件则跳过  应该按名称命名的文件夹
-            continue
-        else:
-            embs = []
-            for image_name in tqdm.tqdm(os.listdir(folder_path)):
-                image_full_path = os.path.join(folder_path, image_name)
-                if not os.path.isfile(image_full_path):
-                    continue
-                else:
-                    face_image = detect_face(input_image_path=image_full_path)  # 返回的是GBR 格式图像
-                    if face_image is None:
-                        continue
-                    img = face_image[:, :, [2, 1, 0]]
-                    #                     img=np.transpose(face_image,(2,0,1))
-                    with torch.no_grad():
-                        if tta:
-                            mirror = trans.functional.hflip(img)
-                            emb = model(conf.test_transform(img).to(conf.device).unsqueeze(0))
-                            emb_mirror = model(conf.test_transform(mirror).to(conf.device).unsqueeze(0))
-                            embs.append(l2_norm(emb + emb_mirror))
-                        else:
-                            embs.append(model(conf.test_transform(img).to(conf.device).unsqueeze(0)))
-        if len(embs) == 0:
-            continue
-        embedding = torch.cat(embs).mean(0, keepdim=True)
-        print(type(embedding),embedding.shape)
-        # 在文件夹中保存numpy矩阵
-        feature_numpy = torch.cat(embs).cpu().numpy()
-        print('save numpy mat addr',folder_path)
-        np.save(os.path.join(folder_path, 'embedding_feature.npy'), feature_numpy)
-        print(type(feature_numpy), feature_numpy.shape)
-        embedding_numpy.append(feature_numpy)
-        embeddings.append(embedding)
-        names.append(folder_name)
-    embeddings = torch.cat(embeddings)
-    names = np.array(names)
-    torch.save(embeddings, os.path.join(prepare_image_path, 'facebank.pth'))
-    np.save(os.path.join(prepare_image_path, 'name.npy'), names)
-    return embeddings, names
-
-# 加载人脸特征
-def load_my_facebank(conf=None):
-    embeddings = torch.load(os.path.join(prepare_image_path, 'facebank.pth'))
-    names = np.load(os.path.join(prepare_image_path, 'name.npy'))
-    return embeddings, names
-
-
-# 获取人脸嵌入特征
-def return_facebank(update=False):
-    if update:
-        targets, names = prepare_my_facebank(conf, learner.model, tta=False)
-        print('facebank updated')
-    else:
-        targets, names = load_my_facebank(conf)
-        print('facebank loaded')
-    return targets, names
-
-
 if __name__ == '__main__':
-    return_facebank(True)
-    # import torch
-    # print(torch.cuda.is_available())
+    obj = EmbeddingFace()
+    obj.return_facebank(update=True)
+
 
