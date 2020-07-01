@@ -9,7 +9,7 @@ face_dir = os.path.dirname(os.path.abspath('__file__'))
 sys.path.append(face_dir)  # face
 sys.path.append(os.path.join(face_dir, 'retinaface'))
 sys.path.append(os.path.join(face_dir, 'insight_face'))
-print(sys.path)
+# print(sys.path)
 import argparse
 # face detect 包  调用retinaface
 import numpy as np
@@ -65,7 +65,7 @@ class EmbeddingFace:
         # facebank路径 按名称进行命名  提取特征后在该路径保存name和feature
         # 修改为自己需要的目录
         # self.prepare_image_path = os.path.join(base_config.data_rootdir,'extract_face')
-        self.prepare_image_path = r'C:\PythonProject\find_people\data\facebank'
+        self.prepare_image_path = base_config.extract_face_dir
         self.threshold = 1.54  # ',help='threshold to decide identical faces',default=1.54, type=float)
         self.update = True  # 更新facebank
         self.tta = False  # ", help="whether test time augmentation",action="store_true")

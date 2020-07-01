@@ -60,7 +60,7 @@ class RetinaFace(nn.Module):
             backbone = MobileNetV1()
             if cfg['pretrain']:
                 # 改成绝对路径
-                checkpoint = torch.load(os.path.join(base_config.root_dir,r"core\face\retinaface\weights\mobilenetV1X0.25_pretrain.tar"), map_location=torch.device('cpu'))
+                checkpoint = torch.load(os.path.join(base_config.root_dir,r"core\weights\retinaface\mobilenetV1X0.25_pretrain.tar"), map_location=torch.device('cpu'))
                 from collections import OrderedDict
                 new_state_dict = OrderedDict()
                 for k, v in checkpoint['state_dict'].items():

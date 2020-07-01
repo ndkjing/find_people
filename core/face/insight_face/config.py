@@ -4,6 +4,10 @@ import torch
 from torch.nn import CrossEntropyLoss
 from torchvision import transforms as trans
 import base_config
+
+"""
+insight_face config
+"""
 def get_config(training = True):
     conf = edict()
     conf.data_path = Path('insight_data')
