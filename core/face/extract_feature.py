@@ -1,1 +1,0 @@
-from prepare_facebank import  *
