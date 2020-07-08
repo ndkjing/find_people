@@ -1,9 +1,6 @@
 """
-准备处理人脸数据集，使用Retinaface将人脸检测出裁剪输入arcface中获取embedding
+准备提取的人脸，将人脸对齐然后获取512D embedding
 """
-import os, sys
-
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 import os, sys
 face_dir = os.path.dirname(os.path.abspath('__file__'))
 sys.path.append(face_dir)  # face

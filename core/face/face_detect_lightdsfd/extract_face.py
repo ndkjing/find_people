@@ -1,13 +1,14 @@
 from __future__ import print_function
 import sys
 import os
+#在cmd命令行运行下需要添加如下路径
 root_dir = r'D:\PythonProject\find_people'
 sys.path.append(root_dir)
 sys.path.append(os.path.join(root_dir,'core'))
 sys.path.append(os.path.join(root_dir,'face'))
 sys.path.append(os.path.join(root_dir,'weights'))
 
-import argparse
+
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
