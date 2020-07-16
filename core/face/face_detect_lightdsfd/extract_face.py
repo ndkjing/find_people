@@ -240,6 +240,29 @@ class ExteactFace:
                     else:
                         cv2.imwrite(write_image_path, out_image)
 
+    ## 在摄像头上检测
+    def web_camera(self):
+        with torch.no_grad():
+            cap = cv2.VideoCapture(0)
+            current_frame = 1
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            detect_second = 1.5  # 检测间隔3秒
+            interval = fps * detect_second
+            patient = 5
+            print('fps', fps)
+            while True:
+                start_time = time.time()
+                flag, frame = cap.read()
+                if not flag:
+                    print('video is over')
+                    break
+                # 当未检测到人脸时候间隔检测
+                if current_frame % interval == 0:
+                    print('interval:', interval)
+                    current_time = time.time()
+                    # print('read video cost time',current_time-start_time)
+                    self.process_image(image=frame,show_image=True)
+
     # 提取视频文件夹
     def process_video(self,reload_all=False):
         with torch.no_grad():
@@ -340,7 +363,8 @@ class ExteactFace:
 
 if __name__=='__main__':
     # 测试单张图片检测效果
-    i = ExteactFace()
+    obj = ExteactFace()
     # i.process_image(image_path=r'D:\PythonProject\find_people\core\face\face_detect_lightdsfd\images_test\yuebing.jpg',show_image=True)
-    i.process_video(reload_all=False)
+    # i.process_video(reload_all=False)
+    obj.web_camera()
     # i.process_images_file()

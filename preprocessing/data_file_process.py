@@ -4,6 +4,7 @@ import uuid
 import base_config
 import glob
 import json
+import time
 from tqdm import tqdm
 import hashlib
 """
@@ -65,6 +66,7 @@ def generate_videos_path_map(reload_all=False):
     :param updata:
     :return:
     """
+    video_part_path_md5 = os.listdir(os.path.join(base_config.data_rootdir,'extract_face'))
     if reload_all:
         try:
             os.remove(base_config.md5_videos_path_jsonpath)
@@ -105,31 +107,57 @@ def generate_videos_path_map(reload_all=False):
             print(videos_sub1_dir,'是包含图片的文件夹')
             for video_name in videos_files:
                 video_path = os.path.join(videos_sub1_dir,video_name)
+                video_part_path = video_path.split('row')[1]
                 print('video_path', video_path)
-                if video_path in videos_path_md5_json.keys():
+                if video_part_path in videos_path_md5_json.keys():
                     print('已包含该视频',video_path)
                 else:
-                    md5_code =get_md5_code_str(video_path)
+                    md5_code =get_md5_code_str(video_part_path)
                     # 视频路径：[md5code 有图片  已提取]
-                    videos_path_md5_json[video_path]=[md5_code,True,False]
-                    md5_videos_path_json[md5_code] = video_path
+                    md5_code =get_md5_code_str(video_part_path)
+                    extracted = True if md5_code in video_part_path_md5 else False
+                    # 视频路径：[md5code 有图片  已提取]
+                    videos_path_md5_json[video_part_path]=[md5_code,True,extracted]
         else:
             print(videos_sub1_dir, '是不包含图片的文件夹')
             for video_name in videos_files:
                 video_path = os.path.join(videos_sub1_dir,video_name)
-                print('video_path', video_path)
-                if video_path in videos_path_md5_json.keys():
+                video_part_path = video_path.split('row')[1]
+                print('video_part_path', video_part_path)
+                if video_part_path in videos_path_md5_json.keys():
                     print('已包含该视频',video_path)
                 else:
-                    md5_code =get_md5_code_str(video_path)
+                    md5_code =get_md5_code_str(video_part_path)
+                    extracted = True if md5_code in video_part_path_md5 else False
                     # 视频路径：[md5code 有图片  已提取]
-                    videos_path_md5_json[video_path]=[md5_code,False,False]
-                    md5_videos_path_json[md5_code] = video_path
+                    videos_path_md5_json[video_part_path]=[md5_code,False,extracted]
 
     with open(base_config.videos_path_md5_jsonpath,'w') as f:
         json.dump(videos_path_md5_json,f)
-    with open(base_config.md5_videos_path_jsonpath,'w') as f1:
-        json.dump(md5_videos_path_json,f1)
+
+import shutil
+
+## 修改videos 路径重新生成MD5值但是保持已提取不变
+def change_video_path_and_md5():
+    with open(base_config.videos_path_md5_jsonpath,'r') as f:
+        videos_path_md5_json = json.load(f)
+    new_json={}
+    ### 对所有视频路径进行替换
+    for video_path,(md5_code,has_image,extracted) in videos_path_md5_json.items():
+        print(video_path.split('row'))
+        new_path = video_path.split('row')[1]
+        new_md5_code = get_md5_code_str(new_path)
+        new_json[new_path]=[new_md5_code,has_image,extracted]
+        ## 对所有已提取的文件名进行替换
+        # src_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',md5_code)
+        # dst_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',new_md5_code)
+        # shutil.move(src_file_dir,dst_file_dir)
+    with open(base_config.videos_path_md5_jsonpath,'w') as f:
+        json.dump(new_json,f)
+
+
+
+
 
 # 使用md5
 def vaild_same_video_md5(video_path=None):
@@ -198,3 +226,4 @@ if __name__=='__main__':
     # generate_images_path_map(False)
     # print(vaild_same_video_md5(r'D:\dataset\crawler\row\videos\001-1\001-1.mp4'))
     # vaild_all_video()
+    # change_video_path_and_md5()

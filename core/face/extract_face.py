@@ -5,7 +5,8 @@ import os
 root_dir = r'D:\PythonProject\find_people'
 sys.path.append(root_dir)
 sys.path.append(os.path.join(root_dir,'core'))
-sys.path.append(os.path.join(root_dir,'face'))
+sys.path.append(os.path.join(root_dir,'core','face'))
+sys.path.append(os.path.join(root_dir,'core','face','faster_face'))
 sys.path.append(os.path.join(root_dir,'weights'))
 
 """
@@ -135,7 +136,7 @@ class ExteactFace:
         threshold = 0.7  # help='score threshold')
         candidate_size = 1000  # help='nms candidate size')
 
-        test_device = "cpu"  # help='cuda:0 or cpu')
+        test_device = "cuda:0"  # help='cuda:0 or cpu')
 
         define_img_size(
             input_size)  # must put define_img_size() before 'import create_mb_tiny_fd, create_mb_tiny_fd_predictor'
@@ -143,7 +144,7 @@ class ExteactFace:
         from vision.ssd.mb_tiny_fd import create_mb_tiny_fd, create_mb_tiny_fd_predictor
         from vision.ssd.mb_tiny_RFB_fd import create_Mb_Tiny_RFB_fd, create_Mb_Tiny_RFB_fd_predictor
         from vision.utils.misc import Timer
-        label_path = os.path.join(base_config.root_dir,r'core\face\Ultra-Light-Fast-Generic-Face-Detector-1MB\models\voc-model-labels.txt')
+        label_path = os.path.join(base_config.root_dir,r'core\face\faster_face\models\voc-model-labels.txt')
 
 
         # cap = cv2.VideoCapture(args.video_path)  # capture from video
@@ -157,12 +158,12 @@ class ExteactFace:
         threshold = threshold
 
         if net_type == 'slim':
-            model_path = os.path.join(base_config.root_dir,r'core\face\Ultra-Light-Fast-Generic-Face-Detector-1MB\models\pretrained\version-slim-320.pth')
+            model_path = os.path.join(base_config.root_dir,r'core\face\faster_face\models\pretrained\version-slim-320.pth')
             # model_path = "models/pretrained/version-slim-640.pth"
             net = create_mb_tiny_fd(len(class_names), is_test=True, device=test_device)
             predictor = create_mb_tiny_fd_predictor(net, candidate_size=candidate_size, device=test_device)
         elif net_type == 'RFB':
-            model_path = os.path.join(base_config.root_dir,r'core\face\Ultra-Light-Fast-Generic-Face-Detector-1MB\models\pretrained\version-RFB-320.pth')
+            model_path = os.path.join(base_config.root_dir,r'core\face\faster_face\models\pretrained\version-RFB-320.pth')
             # model_path = "models/pretrained/version-RFB-640.pth"
             net = create_Mb_Tiny_RFB_fd(len(class_names), is_test=True, device=test_device)
             predictor = create_Mb_Tiny_RFB_fd_predictor(net, candidate_size=candidate_size, device=test_device)
@@ -183,7 +184,7 @@ class ExteactFace:
         match = zh_pattern.search(word)
         return match
 
-    # 提取图片文件夹
+    # 提取图片文件夹 dsfd_light
     def process_image(self,image_path=None,image=None,show_image=False):
         # 清除无用张量
         torch.cuda.empty_cache()
@@ -274,8 +275,8 @@ class ExteactFace:
         处理ultra模型
         :return:
         """
-        print(image_path)
-        assert image_path != None or image  != None,'图片或图片路径必须有一个不为空'
+        # print(image_path)
+        assert image_path is not None or image is not None ,'图片或图片路径必须有一个不为空'
         if image_path:
             if self.contain_zh(image_path):
                 image_cv2 = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), -1)
@@ -283,28 +284,52 @@ class ExteactFace:
                 image_cv2 = cv2.imread(image_path)
         else:
             image_cv2 = image
-        print(image_cv2.shape)
+        h,w = image_cv2.shape[:2]
+        # print(image_cv2.shape)
         threshold = 0.7  # help='score threshold')
         candidate_size = 1000  # help='nms candidate size')
         image = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2RGB)
         start_time = time.time()
         boxes, labels, probs = self.predictor.predict(image, candidate_size / 2, threshold)
-        print('detect cost time ...',time.time()-start_time)
-        for i in range(boxes.size(0)):
+        # print('boxes.shape,type(boxes)',boxes.shape,type(boxes),probs)
+        boxes = boxes.numpy()
+        probs = probs.numpy()
+        # print('detect cost time ...',time.time()-start_time)
+        return_images=[]
+        for i in range(boxes.shape[0]):
             box = boxes[i, :]
             label = f" {probs[i]:.2f}"
-            cv2.rectangle(image, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 4)
-            # cv2.putText(orig_image, label,
-            #             (box[0], box[1] - 10),
-            #             cv2.FONT_HERSHEY_SIMPLEX,
-            #             0.5,  # font scale
-            #             (0, 0, 255),
-            #             2)  # line type
-        print(image.shape)
+            # 放大检测框
+            x_length, y_length = abs(box[0] - box[2]), abs(box[1] - box[3])
+            add_x = x_length * (base_config.face_enlarge - 1) / 2
+            add_y = y_length * (base_config.face_enlarge - 1) / 2
+            box_large = box + [-add_x, -add_y, add_x, add_y]
+            if box_large[0] < 0:
+                box_large[0] = 0
+            if box_large[1] < 0:
+                box_large[1] = 0
+            if box_large[2] > w:
+                box_large[2] = w
+            if box_large[3] > h:
+                box_large[3] = h
+            box = np.array(box, np.int32)
+            box_large = np.array(box_large, np.int32)
+            crop_face = image_cv2[box_large[1]:box_large[3], box_large[0]:box_large[2], :]
+            return_images.append([crop_face, round(probs[i], 2)])
+            if show_image:
+                cv2.rectangle(image, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 4)
+                # cv2.putText(orig_image, label,
+                #             (box[0], box[1] - 10),
+                #             cv2.FONT_HERSHEY_SIMPLEX,
+                #             0.5,  # font scale
+                #             (0, 0, 255),
+                #             2)  # line type
+        # print(image.shape)
         if show_image:
             cv2.imshow('annotated', image[:,:,[2,1,0]])
             cv2.waitKey(0)
-
+        # print("{} faces are detected in .".format(len(return_images)))
+        return return_images
 
     # 提取图片文件夹
     def process_images_file(self):
@@ -335,9 +360,13 @@ class ExteactFace:
         with torch.no_grad():
             with open(self.videos_path_md5_jsonpath,'r') as f:
                 videos_path_md5 = json.load(f)
-            for video_path,(md5_code,have_image,extracted) in tqdm(videos_path_md5.items()):
+            for video_path in list(videos_path_md5.keys()):
+                print('video_path',video_path)
+                md5_code, have_image, extracted = videos_path_md5[video_path]
+                full_video_path = os.path.join(base_config.row_dir, video_path.strip('\\'))
+                print(extracted)
                 if extracted and not reload_all:
-                    print('该视频已检测，跳过',video_path)
+                    print('该视频已检测，跳过',full_video_path)
                     continue
                 # 保存图片序列号
                 i=1
@@ -355,22 +384,35 @@ class ExteactFace:
                         for image_name in images_name:
                             image_path = os.path.join(os.path.split(video_path)[0],image_name)
                             # 传递给图片处理函数
-                            out_images = self.process_image(image_path=image_path)
+                            # out_images = self.process_image(image_path=image_path)
+                            ## TODO
+                            out_images = self.process_image_ultra(image_path=image_path)
                             for out_image,face_confi in out_images:
                                 # 根据文件夹长度命名
+                                if face_confi<0.98:
+                                    continue
                                 write_image_path = os.path.join(write_image_dir, str(i) + '_' + str(face_confi) + '.jpg')
                                 cv2.imwrite(write_image_path,out_image)
                                 i+=1
 
                 # 处理视频
-                print('######################video_path',video_path)
-                cap = cv2.VideoCapture(video_path)
+                print('######################full_video_path',full_video_path)
+                ## 对于AV类人脸过多加大监测间隔
+                if '91麻豆' in full_video_path:
+                    detect_second = 4  # 检测间隔3秒
+                    init_patient = 2
+                    patient = init_patient
+                else:
+                    detect_second = 1.5  # 检测间隔3秒
+                    init_patient = 5
+                    patient = init_patient
+                cap = cv2.VideoCapture(full_video_path)
                 current_frame=1
                 fps = int(cap.get(cv2.CAP_PROP_FPS))
-                detect_second=1.5   # 检测间隔3秒
+                ## 监测间隔帧数
                 interval = fps*detect_second
-                patient = 5
-                print('fps', fps)
+
+                # print('fps', fps)
                 while True:
                     start_time = time.time()
                     flag,frame = cap.read()
@@ -382,20 +424,25 @@ class ExteactFace:
                         print('interval:',interval)
                         current_time = time.time()
                         # print('read video cost time',current_time-start_time)
-                        out_images = self.process_image(image=frame)
+                        ## TODO
+                        ## 调用不同方法
+                        # out_images = self.process_image(image=frame)
+                        out_images = self.process_image_ultra(image=frame)
+
                         detect_time = time.time()
-                        print('detect cost time', detect_time - current_time)
+                        # print('detect cost time', detect_time - current_time)
                         # 当检测到人脸时减小检测间隔  超过一定间隔未检测到就增大间隔间隔
                         if len(out_images)!=0:
                             interval=int(fps//2)
-                            patient=5
+                            patient=init_patient
                         if interval==int(fps//2) and len(out_images)==0:
                             patient-=1
                         if patient<=0:
                             interval=fps*detect_second
 
                         for (out_image,face_confi) in out_images:
-
+                            if face_confi<0.98:
+                                continue
                             write_image_path = os.path.join(write_image_dir, str(i)+'_'+str(face_confi) + '.jpg')
                             print('write image',write_image_path)
                             cv2.imwrite(write_image_path, out_image)
@@ -431,7 +478,7 @@ class ExteactFace:
 if __name__=='__main__':
     # 测试单张图片检测效果
     i = ExteactFace('ultra')
-    i.process_image_ultra(image_path=os.path.join(base_config.root_dir,r'core\face\yuebing.jpg'),show_image=True)
+    # i.process_image_ultra(image_path=os.path.join(base_config.root_dir,r'core\face\yuebing.jpg'),show_image=True)
 
-    # i.process_video(reload_all=False)
+    i.process_video(reload_all=False)
     # i.process_images_file()

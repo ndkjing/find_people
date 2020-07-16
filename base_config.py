@@ -6,7 +6,7 @@ root_dir  = r'D:\PythonProject\find_people'
 
 
 ## 数据路径
-data_rootdir = 'D:\dataset\crawler'
+data_rootdir = 'I:\crawler'
 # data_rootdir = 'C:\PythonProject\dataset\crawler'
 row_dir = os.path.join(data_rootdir,'row')
 extract_face_dir = os.path.join(data_rootdir,'extract_face')
