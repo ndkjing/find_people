@@ -1,3 +1,6 @@
 core/weights
 data/facebank
 .idea
+.idea/
+.git
+.git/

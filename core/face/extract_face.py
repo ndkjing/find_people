@@ -1,6 +1,8 @@
 from __future__ import print_function
 import sys
 import os
+from queue import Queue
+import threading
 #在cmd命令行运行下需要添加如下路径
 root_dir = r'D:\PythonProject\find_people'
 sys.path.append(root_dir)
@@ -356,16 +358,16 @@ class ExteactFace:
                         cv2.imwrite(write_image_path, out_image)
 
     # 提取视频文件夹
-    def process_video(self,reload_all=False):
+    def process_videos(self,reload_all=False):
         with torch.no_grad():
             with open(self.videos_path_md5_jsonpath,'r') as f:
                 videos_path_md5 = json.load(f)
-            for video_path in list(videos_path_md5.keys()):
+            for video_path in tqdm(list(videos_path_md5.keys())):
                 print('video_path',video_path)
                 md5_code, have_image, extracted = videos_path_md5[video_path]
                 full_video_path = os.path.join(base_config.row_dir, video_path.strip('\\'))
-                print(extracted)
-                if extracted and not reload_all:
+                # print(extracted)
+                if extracted and not reload_all  :
                     print('该视频已检测，跳过',full_video_path)
                     continue
                 # 保存图片序列号
@@ -389,22 +391,21 @@ class ExteactFace:
                             out_images = self.process_image_ultra(image_path=image_path)
                             for out_image,face_confi in out_images:
                                 # 根据文件夹长度命名
-                                if face_confi<0.98:
+                                if face_confi<0.95:
                                     continue
                                 write_image_path = os.path.join(write_image_dir, str(i) + '_' + str(face_confi) + '.jpg')
                                 cv2.imwrite(write_image_path,out_image)
                                 i+=1
-
                 # 处理视频
                 print('######################full_video_path',full_video_path)
                 ## 对于AV类人脸过多加大监测间隔
                 if '91麻豆' in full_video_path:
-                    detect_second = 4  # 检测间隔3秒
+                    detect_second = 4  # 检测间隔4秒
                     init_patient = 2
                     patient = init_patient
                 else:
-                    detect_second = 1.5  # 检测间隔3秒
-                    init_patient = 5
+                    detect_second = 1.5  # 检测间隔1秒
+                    init_patient = 3
                     patient = init_patient
                 cap = cv2.VideoCapture(full_video_path)
                 current_frame=1
@@ -413,41 +414,42 @@ class ExteactFace:
                 interval = fps*detect_second
 
                 # print('fps', fps)
+                start_time = time.time()
                 while True:
-                    start_time = time.time()
                     flag,frame = cap.read()
                     if not flag:
                         print('video is over')
                         break
                     # 当未检测到人脸时候间隔检测
                     if current_frame%interval==0:
-                        print('interval:',interval)
-                        current_time = time.time()
+                        # print('interval:',interval)
+                        # current_time = time.time()
                         # print('read video cost time',current_time-start_time)
-                        ## TODO
                         ## 调用不同方法
                         # out_images = self.process_image(image=frame)
                         out_images = self.process_image_ultra(image=frame)
 
-                        detect_time = time.time()
+                        # detect_time = time.time()
                         # print('detect cost time', detect_time - current_time)
                         # 当检测到人脸时减小检测间隔  超过一定间隔未检测到就增大间隔间隔
                         if len(out_images)!=0:
-                            interval=int(fps//2)
+                            interval=int(fps//5)
                             patient=init_patient
-                        if interval==int(fps//2) and len(out_images)==0:
+                        if interval==int(fps//5) and len(out_images)==0:
                             patient-=1
                         if patient<=0:
-                            interval=fps*detect_second
-
+                            patient = init_patient
+                            interval = int(detect_second*fps)
                         for (out_image,face_confi) in out_images:
-                            if face_confi<0.98:
+                            ## 忽略置信度小于阈值
+                            if face_confi<0.95:
                                 continue
                             write_image_path = os.path.join(write_image_dir, str(i)+'_'+str(face_confi) + '.jpg')
-                            print('write image',write_image_path)
+                            # print('write image',write_image_path)
                             cv2.imwrite(write_image_path, out_image)
                             i += 1
-                        # print('write time', time.time() - detect_time)
+                    if current_frame == 10000:
+                        print('检测10000帧消耗时间', time.time() - start_time)
                     current_frame+=1
                     # 处理完视频后 更新视频为已处理标志位
                 videos_path_md5.update({video_path: [md5_code, have_image, True]})
@@ -473,12 +475,98 @@ class ExteactFace:
         return x
 
 
+def main():
+    i = ExteactFace('ultra')
+    i.process_videos(reload_all=False)
 
+## 多线程报错Process finished with exit code -1073741819 (0xC0000005)，且无法使用GPU 推测是因为同时进入GPU的原因
+def threads_main(thread_nums=3):
+    q_obj = Queue(maxsize=thread_nums)
+    obj_list = []
+    for i in range(thread_nums):
+        obj_list.append(ExteactFace('ultra'))
+    q_videos=Queue()
+    with open(base_config.videos_path_md5_jsonpath, 'r') as f:
+        videos_path_md5 = json.load(f)
+    for part_video_apth,(md5_code,has_image,extracted) in videos_path_md5.items():
+        if not extracted:
+            q_videos.put({os.path.join(base_config.row_dir,part_video_apth.strip('\\')):(md5_code,has_image,extracted)})
+
+    def video(video_item,thread_id):
+        # 处理视频
+        # 保存图片序列号
+        full_video_path, md5_code = list(video_item.keys())[0],list(video_item.values())[0][0]
+        i = 1
+        print(base_config.extract_face_dir, md5_code)
+        write_image_dir = os.path.join(base_config.extract_face_dir, md5_code)
+        if not os.path.exists(write_image_dir):
+            os.mkdir(write_image_dir)
+        print('######################full_video_path', full_video_path)
+        ## 对于AV类人脸过多加大监测间隔
+        if '91麻豆' in full_video_path:
+            detect_second = 4  # 检测间隔4秒
+            init_patient = 2
+            patient = init_patient
+        else:
+            detect_second = 1  # 检测间隔1秒
+            init_patient = 5
+            patient = init_patient
+        cap = cv2.VideoCapture(full_video_path)
+        current_frame = 1
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        ## 监测间隔帧数
+        interval = fps * detect_second
+        start_time = time.time()
+        # print('fps', fps)
+        while True:
+            flag, frame = cap.read()
+            if not flag:
+                print('video is over')
+                break
+            # 间隔检测
+            if current_frame % interval == 0:
+                # print('interval:',interval)
+                # current_time = time.time()
+                # print('read video cost time',current_time-start_time)
+                ## TODO
+                ## 调用不同方法
+                # out_images = self.process_image(image=frame)
+                out_images = obj_list[thread_id].process_image_ultra(image=frame)
+
+                # detect_time = time.time()
+                # print('detect cost time', detect_time - current_time)
+                # 当检测到人脸时减小检测间隔  超过一定间隔未检测到就增大间隔间隔
+                if len(out_images) != 0:
+                    interval = int(fps // 5)
+                    patient = init_patient
+                if interval == int(fps // 5) and len(out_images) == 0:
+                    patient -= 1
+                if patient <= 0:
+                    patient = init_patient
+                    interval = int(detect_second * fps)
+                for (out_image, face_confi) in out_images:
+                    ## 忽略置信度小于阈值
+                    if face_confi < 0.9:
+                        continue
+                    write_image_path = os.path.join(write_image_dir, str(i) + '_' + str(face_confi) + '.jpg')
+                    # print('write image', write_image_path)
+                    cv2.imwrite(write_image_path, out_image)
+                    i += 1
+                # print('write time', time.time() - detect_time)
+            if current_frame%10000==0:
+                print('检测10000帧消耗时间',time.time()-start_time)
+            current_frame += 1
+
+    thread_list = []
+    for i in range(thread_nums):
+        thread_list.append(threading.Thread(target=video,args=(q_videos.get(),i)))
+
+    for thread_i  in thread_list:
+        thread_i.start()
 
 if __name__=='__main__':
     # 测试单张图片检测效果
-    i = ExteactFace('ultra')
+    # i = ExteactFace('ultra')
     # i.process_image_ultra(image_path=os.path.join(base_config.root_dir,r'core\face\yuebing.jpg'),show_image=True)
-
-    i.process_video(reload_all=False)
-    # i.process_images_file()
+    # threads_main(3)
+    main()

@@ -1,6 +1,7 @@
 import os
 import sys
 import uuid
+import shutil
 import base_config
 import glob
 import json
@@ -12,11 +13,30 @@ import hashlib
 """
 
 
-
+## 生成字符串对应md5
 def get_md5_code_str(src):
     m1 = hashlib.md5()
     m1.update(src.encode('utf8'))
     return m1.hexdigest()
+
+##  生成文件内容md5
+def get_md5_code_content(video_path=None):
+    if video_path:
+        video_path=video_path
+    else:
+        video_path=r'D:\dataset\crawler\row\videos\003-1\003-1.mp4'
+    f = open(video_path, 'rb')
+    md5_obj = hashlib.md5()
+    while True:
+        d = f.read(8096)
+        if not d:
+            break
+        md5_obj.update(d)
+    hash_code = md5_obj.hexdigest()
+    f.close()
+    md5 = str(hash_code).lower()
+    return md5
+
 
 # 生成图片对应索引
 def generate_images_path_map(reload_all=False):
@@ -46,7 +66,7 @@ def generate_images_path_map(reload_all=False):
                 if len(images_files) == 0:
                     print(sub1_dir)
                     raise Exception('文件内不存在任何文件')
-                md5_code =  make_file_id(str(sub1_dir))
+                md5_code =  get_md5_code_str(str(sub1_dir))
                 print(md5_code)
                 item = {sub1_dir:[md5_code,False,sub1_file]}
                 inverse_item = {md5_code:sub1_dir}
@@ -135,10 +155,15 @@ def generate_videos_path_map(reload_all=False):
     with open(base_config.videos_path_md5_jsonpath,'w') as f:
         json.dump(videos_path_md5_json,f)
 
-import shutil
 
 ## 修改videos 路径重新生成MD5值但是保持已提取不变
 def change_video_path_and_md5():
+    """
+    she
+    :return:
+    """
+    print('正在对地址进行替换，谨慎使用，等待1分钟后执行')
+    time.sleep(60)
     with open(base_config.videos_path_md5_jsonpath,'r') as f:
         videos_path_md5_json = json.load(f)
     new_json={}
@@ -149,38 +174,22 @@ def change_video_path_and_md5():
         new_md5_code = get_md5_code_str(new_path)
         new_json[new_path]=[new_md5_code,has_image,extracted]
         ## 对所有已提取的文件名进行替换
-        # src_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',md5_code)
-        # dst_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',new_md5_code)
-        # shutil.move(src_file_dir,dst_file_dir)
+        src_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',md5_code)
+        dst_file_dir = os.path.join(r'D:\dataset\crawler\extract_face',new_md5_code)
+        shutil.move(src_file_dir,dst_file_dir)
     with open(base_config.videos_path_md5_jsonpath,'w') as f:
         json.dump(new_json,f)
 
 
-
-
-
-# 使用md5
-def vaild_same_video_md5(video_path=None):
-    if video_path:
-        video_path=video_path
-    else:
-        video_path=r'D:\dataset\crawler\row\videos\003-1\003-1.mp4'
-    f = open(video_path, 'rb')
-    md5_obj = hashlib.md5()
-    while True:
-        d = f.read(8096)
-        if not d:
-            break
-        md5_obj.update(d)
-    hash_code = md5_obj.hexdigest()
-    f.close()
-    md5 = str(hash_code).lower()
-    return md5
-
-# 验证视频内容是否重复
-def vaild_all_video():
+## 验证视频内容是否重复
+def valid_video_content_repeat():
     # md5内容映射表验证所有视频是否内容重复
-    md5_content_dict = {}
+    try:
+        with open(base_config.video_content_md5_video_path) as f:
+            md5_content_dict = json.load(f)
+    except:
+        print('没有存储的Md5值，从0开始检测')
+        md5_content_dict = {}
     videos_dir = os.path.join(base_config.row_dir, 'videos')
     videos_dirname_lists = os.listdir(videos_dir)
     for videos_dirname in tqdm(videos_dirname_lists):
@@ -198,32 +207,37 @@ def vaild_all_video():
 
             for video_name in videos_files:
                 video_path = os.path.join(videos_sub1_dir, video_name)
+                print('video_path#################', video_path)
                 # print('video_path', video_path)
-                video_content_md5 = vaild_same_video_md5(video_path)
+                if video_path.split('row')[1] in md5_content_dict.values():
+                    print('已经测过该视频跳过')
+                    continue
+                video_content_md5 = get_md5_code_content(video_path)
                 # print('video_content_md5',video_content_md5)
                 if video_content_md5 in md5_content_dict.keys():
-                    print('已包含该视频')
-                    print('##################source',md5_content_dict[video_content_md5])
-                    print('##################repeat',video_path)
-
+                    print('#################已包含该视频')
+                    print('##################原始路径',md5_content_dict[video_content_md5])
+                    print('##################重复路径',video_path)
                 else:
-                    md5_content_dict[video_content_md5] = video_path
+                    md5_content_dict[video_content_md5] = video_path.split('row')[1]
 
         elif os.path.isfile(videos_sub1_dir):
             video_path = videos_sub1_dir
+            print('video_path 直接就是视频#################', video_path)
             print('video_path', video_path)
-            video_content_md5 = vaild_same_video_md5(video_path)
-            if video_content_md5 in md5_content_dict:
+            video_content_md5 = get_md5_code_content(video_path)
+            if video_content_md5 in md5_content_dict.keys():
                 print('已包含该视频')
                 print('##################source', md5_content_dict[video_content_md5])
                 print('##################repeat', video_path)
             else:
-                md5_content_dict[video_content_md5] = video_path
-
+                md5_content_dict[video_content_md5] = video_path.split('row')[1]
+        with open(base_config.video_content_md5_video_path,'w') as f:
+            json.dump(md5_content_dict,f)
 
 if __name__=='__main__':
-    generate_videos_path_map(reload_all=True)
+    generate_videos_path_map(reload_all=False)
     # generate_images_path_map(False)
     # print(vaild_same_video_md5(r'D:\dataset\crawler\row\videos\001-1\001-1.mp4'))
-    # vaild_all_video()
+    valid_video_content_repeat()
     # change_video_path_and_md5()

@@ -1,5 +1,5 @@
 """
-This code uses the pytorch model to detect faces from live video or camera.
+refer:https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
 """
 import argparse
 import sys

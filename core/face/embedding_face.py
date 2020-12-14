@@ -2,6 +2,7 @@
 准备提取的人脸，将人脸对齐然后获取512D embedding
 """
 import os, sys
+os.environ['CUDA_ENABLE_DEVICES'] = '0'
 face_dir = os.path.dirname(os.path.abspath('__file__'))
 sys.path.append(face_dir)  # face
 sys.path.append(os.path.join(face_dir, 'retinaface'))
@@ -16,7 +17,7 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import skimage.transform
-
+import glob
 # face detect
 from core.face.retinaface.data import cfg_mnet, cfg_re50
 from core.face.retinaface.layers.functions.prior_box import PriorBox
@@ -70,7 +71,7 @@ class EmbeddingFace:
         self.nms_threshold = 0.4
         self.keep_top_k = 750
         self.save_image = False
-        self.vis_thres = 0.6
+        self.vis_thres = 0.95
         self.desiredFaceHeight=112
         # embedding 超参数
         # facebank路径 按名称进行命名  提取特征后在该路径保存name和feature
@@ -159,6 +160,11 @@ class EmbeddingFace:
         names = ['Unknown']  # 留一个位置给unkn
         for folder_name in tqdm.tqdm(os.listdir(self.prepare_image_path)):
             folder_path = os.path.join(self.prepare_image_path, folder_name)
+            # print(os.path.exists(os.path.join(folder_path,'embedding_feature.npy')),os.path.join(folder_path,'embedding_feature.npy'))
+            if os.path.exists(os.path.join(base_config.align_face_dir,folder_name,'embedding_feature.npy')):
+                print('该文件夹已提取，',folder_name)
+                continue
+
             print('folder_path',folder_path)
             if os.path.isfile(folder_path):  # 若是文件则跳过  应该按名称命名的文件夹
                 continue
@@ -169,7 +175,7 @@ class EmbeddingFace:
                     if not os.path.isfile(image_full_path):
                         continue
                     else:
-                        face_image = self.detect_face(image=image_full_path)  # 返回的是GBR 格式图像
+                        face_image = self.detect_face(image_path=image_full_path,save=True)  # 返回的是GBR 格式图像
                         if face_image is None:
                             continue
                         img = face_image[:, :, [2, 1, 0]]
@@ -188,12 +194,15 @@ class EmbeddingFace:
             print(type(embedding), embedding.shape)
             # 在文件夹中保存numpy矩阵
             feature_numpy = torch.cat(embs).cpu().numpy()
-            print('save numpy mat addr', folder_path)
-            np.save(os.path.join(folder_path, 'embedding_feature.npy'), feature_numpy)
-            print(type(feature_numpy), feature_numpy.shape)
-            embedding_numpy.append(feature_numpy)
-            embeddings.append(embedding)
-            names.append(folder_name)
+            save_npy_path = os.path.join(base_config.align_face_dir, folder_name)
+            print('save numpy mat addr', save_npy_path)
+            if not os.path.exists(save_npy_path):
+                os.mkdir(save_npy_path)
+            np.save(os.path.join(save_npy_path, 'embedding_feature.npy'), feature_numpy)
+            # print(type(feature_numpy), feature_numpy.shape)
+            # embedding_numpy.append(feature_numpy)
+            # embeddings.append(embedding)
+            # names.append(folder_name)
         # embeddings = torch.cat(embeddings)
         # names = np.array(names)
         # torch.save(embeddings, os.path.join(self.prepare_image_path, 'facebank.pth'))
@@ -211,7 +220,7 @@ class EmbeddingFace:
         except Exception:
             print('error image', image)
             return None
-        scale = torch.Tensor([image.shape[1], image.shape[0], image.shape[1], image.shape[0]])
+        scale = torch.Tensor([image.shape[1], image.shape[0], image.shape[1], image.shape[0]]).float()
         image -= (104, 117, 123)
         img = image.transpose(2, 0, 1)
         img = torch.from_numpy(img).unsqueeze(0)
@@ -231,10 +240,13 @@ class EmbeddingFace:
         boxes = boxes.cpu().numpy()
         scores = conf.squeeze(0).data.cpu().numpy()[:, 1]
         landms = decode_landm(landms.data.squeeze(0), prior_data, self.cfg['variance'])
-        scale1 = torch.Tensor([img.shape[3], img.shape[2], img.shape[3], img.shape[2],
+        scale1 = torch.tensor([img.shape[3], img.shape[2], img.shape[3], img.shape[2],
                                img.shape[3], img.shape[2], img.shape[3], img.shape[2],
                                img.shape[3], img.shape[2]])
         scale1 = scale1.to(device)
+        scale1 = scale1.float()
+        landms =landms.float()
+        # resize = resize.float()
         landms = landms * scale1 / resize
         landms = landms.cpu().numpy()
 
@@ -275,20 +287,26 @@ class EmbeddingFace:
         """
         if save:
             image_dir, image_name = os.path.split(image_path)[0:2]
-            if not os.path.exists(os.path.join(image_dir, 'align_face')):
-                os.mkdir(os.path.join(image_dir, 'align_face'))
-            save_image_path = os.path.join(image_dir, 'align_face', image_name)
+            md5_code = os.path.split(image_dir)[1]
+            save_image_dir = os.path.join(base_config.align_face_dir, md5_code)
+            if not os.path.exists(save_image_dir):
+                os.mkdir(save_image_dir)
+
+            save_image_path = os.path.join(save_image_dir, image_name)
         if isinstance(image, str) :
             image = cv2.imread(image)
             # image = np.float32(image)
-        else:
-            image = image
+        elif isinstance(image_path, str):
+            image = cv2.imread(image_path)
         try:
             im_height, im_width = image.shape[:2]
         except Exception:
             print('error image,path', image)
             return None
-        dets = self.get_bbox(image)
+        try:  ##报错不知道如何修复 RuntimeError: cuDNN error: CUDNN_STATUS_INTERNAL_ERROR
+            dets = self.get_bbox(image)
+        except Exception:
+            return None
         # show image
         for b in dets:  # b 0~3 为xmin ymin xmax ymax 4 为threshold  后面连续五个-点为地标
             if b[4] < self.vis_thres:
@@ -318,7 +336,7 @@ class EmbeddingFace:
                 ##在这里返回就可以了 align之后的位置[0:112,0:112,:]就是可用的人脸
                 align_enlarge_image,M = align_obj.align(image=enlarge_image, keypoints=enlarget_kp, ratio=1,return_M=True)
                 if save:
-                    print('save image', save_image_path)
+                    # print('save image', save_image_path)
                     if contain_zh(save_image_path):
                         cv2.imencode('.jpg', align_enlarge_image[0:112,0:112,:])[1].tofile(save_image_path)  # 写入中文路径
                     else:
@@ -521,7 +539,7 @@ class FaceAlignerCv2:
         dY = rightEyeCenter[1] - leftEyeCenter[1]
         dX = rightEyeCenter[0] - leftEyeCenter[0]
         angle = np.degrees(np.arctan2(dY, dX))
-        print('angle', angle)
+        # print('angle', angle)
         # compute the desired right eye x-coordinate based on the
         # desired x-coordinate of the left eye
         desiredRightEyeX = 1.0 - self.desiredLeftEye[0]
@@ -570,7 +588,7 @@ class FaceAlignerCv2:
         :return: 缩放后的
         """
         h, w = image.shape[:2]
-        print('image_h_w',h, w)
+        # print('image_h_w',h, w)
         enlarge_w = (bbox[2] - bbox[0]) * (ratio - 1)
         enlarge_h = (bbox[3] - bbox[1]) * (ratio - 1)
         enlarge_bbox = [bbox[0] - enlarge_w / 2, bbox[1] - enlarge_h / 2, bbox[2] + enlarge_w / 2,
@@ -596,56 +614,56 @@ class FaceAlignerCv2:
         else:
             enlarge_bbox[3] = int(enlarge_bbox[3])
 
-        print('enlarge_bbox',enlarge_bbox)
+        # print('enlarge_bbox',enlarge_bbox)
         enlarge_image = image[enlarge_bbox[1]:enlarge_bbox[3], enlarge_bbox[0]:enlarge_bbox[2], :]
         return enlarge_bbox,enlarge_image
 
-    def align_face(self):
-        # 安装face_alignment
-        #测试时使用
-        import face_alignment
-        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device='cpu')
-        image_path = r'C:\PythonProject\find_people\data\test_data\wjc.jpg'
-        input_img = io.imread(image_path)
-        start_time = time.time()
-        preds = fa.get_landmarks(input_img)[-1]
-        print('cost time ', time.time() - start_time)
-        ratio = 3
-        obj = FaceAlignerCv2(preds)
-        image_cv2 = cv2.imread(image_path)
-        # print(min(preds[:,1]))
-        rect = [int(i) for i in [min(preds[:, 0]), min(preds[:, 1]), max(preds[:, 0]), max(preds[:, 1])]]
-        crop_image = image_cv2[rect[1]:rect[3], rect[0]:rect[2], :]
-        print(rect)
-        enlarge_bbox = enlarge_crop(rect, ratio, image_cv2)
-        cv2.imshow('crop_image', crop_image)
-        enlarge_crop_image = image_cv2[enlarge_bbox[1]:enlarge_bbox[3], enlarge_bbox[0]:enlarge_bbox[2], :]
-        cv2.imshow('enlarge_crop_image', enlarge_crop_image)
-        keypoints1 = obj.keypoints - np.asarray([int(min(preds[:, 0])), int(min(preds[:, 1]))])
-        out_image1 = obj.align(crop_image, keypoints1)
-        cv2.imshow('out_image1', out_image1)
-
-        keypoints2 = obj.keypoints - np.asarray([enlarge_bbox[0], enlarge_bbox[1]])
-        out_image2 = obj.align(enlarge_crop_image, keypoints2, ratio=ratio)
-        cv2.imshow('out_image2', out_image2)
-        print(out_image2.shape)
-        preds2 = fa.get_landmarks(out_image2[:, :, [2, 0, 1]])[-1]
-
-        rect2 = [int(i) for i in [min(preds2[:, 0]), min(preds2[:, 1]), max(preds2[:, 0]), max(preds2[:, 1])]]
-        if rect2[0] < 0:
-            rect2[0] = 0
-        if rect2[1] < 0:
-            rect2[1] = 0
-        if rect2[2] > out_image2.shape[1]:
-            rect2[2] = int(out_image2.shape[1])
-        if rect2[3] > out_image2.shape[0]:
-            rect2[3] = int(out_image2.shape[0])
-
-        crop_image3 = out_image2[rect2[1]:rect2[3], rect2[0]:rect2[2], :]
-        print('rect2', rect2)
-        # print(crop_image3)
-        cv2.imshow('out_image3', crop_image3)
-        cv2.waitKey(0)
+    # def align_face(self):
+    #     # 安装face_alignment
+    #     #测试时使用
+    #     import face_alignment
+    #     fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device='cpu')
+    #     image_path = r'C:\PythonProject\find_people\data\test_data\wjc.jpg'
+    #     input_img = io.imread(image_path)
+    #     start_time = time.time()
+    #     preds = fa.get_landmarks(input_img)[-1]
+    #     print('cost time ', time.time() - start_time)
+    #     ratio = 3
+    #     obj = FaceAlignerCv2(preds)
+    #     image_cv2 = cv2.imread(image_path)
+    #     # print(min(preds[:,1]))
+    #     rect = [int(i) for i in [min(preds[:, 0]), min(preds[:, 1]), max(preds[:, 0]), max(preds[:, 1])]]
+    #     crop_image = image_cv2[rect[1]:rect[3], rect[0]:rect[2], :]
+    #     print(rect)
+    #     enlarge_bbox = enlarge_crop(rect, ratio, image_cv2)
+    #     cv2.imshow('crop_image', crop_image)
+    #     enlarge_crop_image = image_cv2[enlarge_bbox[1]:enlarge_bbox[3], enlarge_bbox[0]:enlarge_bbox[2], :]
+    #     cv2.imshow('enlarge_crop_image', enlarge_crop_image)
+    #     keypoints1 = obj.keypoints - np.asarray([int(min(preds[:, 0])), int(min(preds[:, 1]))])
+    #     out_image1 = obj.align(crop_image, keypoints1)
+    #     cv2.imshow('out_image1', out_image1)
+    #
+    #     keypoints2 = obj.keypoints - np.asarray([enlarge_bbox[0], enlarge_bbox[1]])
+    #     out_image2 = obj.align(enlarge_crop_image, keypoints2, ratio=ratio)
+    #     cv2.imshow('out_image2', out_image2)
+    #     print(out_image2.shape)
+    #     preds2 = fa.get_landmarks(out_image2[:, :, [2, 0, 1]])[-1]
+    #
+    #     rect2 = [int(i) for i in [min(preds2[:, 0]), min(preds2[:, 1]), max(preds2[:, 0]), max(preds2[:, 1])]]
+    #     if rect2[0] < 0:
+    #         rect2[0] = 0
+    #     if rect2[1] < 0:
+    #         rect2[1] = 0
+    #     if rect2[2] > out_image2.shape[1]:
+    #         rect2[2] = int(out_image2.shape[1])
+    #     if rect2[3] > out_image2.shape[0]:
+    #         rect2[3] = int(out_image2.shape[0])
+    #
+    #     crop_image3 = out_image2[rect2[1]:rect2[3], rect2[0]:rect2[2], :]
+    #     print('rect2', rect2)
+    #     # print(crop_image3)
+    #     cv2.imshow('out_image3', crop_image3)
+    #     cv2.waitKey(0)
 
 
 def check_keys(model, pretrained_state_dict):
@@ -864,7 +882,7 @@ def warp_and_crop_face(src_img,  # BGR
 
 if __name__ == '__main__':
     obj = EmbeddingFace()
-    # obj.return_facebank(update=True)
+    obj.return_facebank(update=True)
     # obj.get_one_image_embedding(image=r'D:\dataset\crawler\extract_face\33bc0927-6da8-4fa5-9a82-c6735debe4c0\1_1.0.jpg')
     # temp_dir = r'D:\dataset\crawler\extract_face\9ec1bcd3-fa58-4546-a4dd-f8cb381ec643'
     # for d in [os.path.join(temp_dir,image_name) for image_name in os.listdir(temp_dir)]:

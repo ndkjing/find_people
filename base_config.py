@@ -10,15 +10,18 @@ data_rootdir = 'I:\crawler'
 # data_rootdir = 'C:\PythonProject\dataset\crawler'
 row_dir = os.path.join(data_rootdir,'row')
 extract_face_dir = os.path.join(data_rootdir,'extract_face')
+align_face_dir = os.path.join(data_rootdir,'align_face')
 extrace_posture_dir = os.path.join(data_rootdir,'extract_posture')
 extrace_voice_dir = os.path.join(data_rootdir,'extract_voice')
 
 # json映射文件路径
-md5_videos_path_jsonpath = os.path.join(root_dir,r'data\md5_videos_path.json')
+# md5_videos_path_jsonpath = os.path.join(root_dir,r'data\md5_videos_path.json')
 videos_path_md5_jsonpath = os.path.join(root_dir,r'data\videos_path_md5.json')
 
-md5_images_path_jsonpath = os.path.join(root_dir,r'data\md5_images_path.json')
+# md5_images_path_jsonpath = os.path.join(root_dir,r'data\md5_images_path.json')
 images_path_md5_jsonpath = os.path.join(root_dir,r'data\images_path_md5.json')
+
+video_content_md5_video_path = os.path.join(root_dir,r'data\video_content_md5_video_path.json')
 
 # 视频检测间隔帧数量
 frame_interval = 5
